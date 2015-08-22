@@ -1,7 +1,7 @@
 
 import re
 from itertools import chain as ichain
-from .version import version as __version__
+from ._version import version as __version__
 
 __all__ = ['GenericEscape','GenericQuote']
 

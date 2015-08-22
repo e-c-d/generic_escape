@@ -3,14 +3,27 @@ import re
 from itertools import chain as ichain
 
 class GenericEscape(object):
-    """You should most definitely subclass this."""
-    
+    r"""You should most definitely subclass this.
+
+>>> ge = GenericEscape()
+>>> ge.escape('a\nb')
+'a\\nb'
+
+The `unescape` method returns a tuple (end_position, unescaped_string).
+>>> ge.unescape('a\\nb')
+(4, 'a\nb')
+
+Note that parsing stops when an unescaped sequence is encountered.
+>>> ge.unescape("ab\\nxy\nc")
+(6, 'ab\nxy')
+"""
     simple_escaped = ["'",'"','\\']
     simple_escaped_character = '\\'
     escaped = {'\n': r'\n'}
     
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         self.update()
+        super().__init__(*args, **kwargs)
     
     def update(self):
         e = self.escaped.copy()

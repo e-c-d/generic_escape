@@ -2,6 +2,17 @@
 import re
 from itertools import chain as ichain
 
+__all__ = ['GenericEscape','GenericQuote']
+
+def re_one_of(xs):
+    """return a regex string that matches one of the xs"""
+    # the "a^" thing matches nothing on purpose (not even with re.M).
+    # it is necessary in the case where `xs` is empty because then the
+    # regex is "()" which then matches the empty string -- oops.
+    escape = re.escape
+    return '|'.join(ichain(
+        (escape(x) for x in sorted(xs, key=len, reverse=True)), ["a^"]))
+
 class GenericEscape(object):
     r"""You should most definitely subclass this.
 
@@ -13,41 +24,36 @@ The `unescape` method returns a tuple (end_position, unescaped_string).
 >>> ge.unescape('a\\nb')
 (4, 'a\nb')
 
-Note that parsing stops when an unescaped sequence is encountered.
+Note that unescaping stops when an unescaped sequence is encountered, UNLESS it
+is in `unescape_whitelist`.
 >>> ge.unescape("ab\\nxy\nc")
 (6, 'ab\nxy')
 """
-    simple_escaped = ["'",'"','\\']
-    simple_escaped_character = '\\'
-    escaped = {'\n': r'\n'}
+    escaped = {"\\": r"\\",
+               "\'": r"\'",
+               "\"": r"\"",
+               "\n": r"\n"}
+    unescape_whitelist = set()
     
     def __init__(self, *args, **kwargs):
-        self.update()
         super().__init__(*args, **kwargs)
+        self.update()
     
     def update(self):
-        e = self.escaped.copy()
-        esc_char = self.simple_escaped_character
-        e.update((x,esc_char+x) for x in self.simple_escaped)
-        
-        def re_one_of(xs):
-            # the "a^" thing matches nothing on purpose.
-            # it is necessary in the case where `xs` is empty
-            # because then the regex is "()" which matches the
-            # empty string. oops.
-            return '|'.join(ichain(
-                (re.escape(x) for x in xs), ["a^"]))
+        e = self.escaped
         
         self._escape_re = re.compile(re_one_of(e.keys()), re.DOTALL)
         
         self._unescape_re = re.compile(
             '({})|({})'.format(*[
                 re_one_of(X)
-                for X in [e.values(), e.keys()]]), re.DOTALL)
+                for X in [e.values(), frozenset(e.keys()).difference(
+                        self.unescape_whitelist)]]), re.DOTALL)
+        
         self._escape_dict = e
         self._unescape_dict = {v:k for k,v in e.items()}
     
-    def unescape(self, string, start_position=0):
+    def unescape(self, string, *, start_position=0):
         """returns (end_position, unescaped_string)"""
         unescape_re   = self._unescape_re
         unescape_dict = self._unescape_dict
@@ -76,4 +82,87 @@ Note that parsing stops when an unescaped sequence is encountered.
         """returns escaped string"""
         escape_dict = self._escape_dict
         return self._escape_re.sub(lambda m:escape_dict[m.group()], string)
+
+class UnquoteError(ValueError):
+    pass
+
+class NoStartingQuoteError(UnquoteError):
+    pass
+
+class NoEndingQuoteError(UnquoteError):
+    pass
+
+class GenericQuote(object):
+    r"""You should most definitely subclass this.
+
+`quoting_delimiters` must contain a dictionary where the key is the starting
+delimiter, and the value is `(ending_delimiter, quoted_ending_delimiter)`.
+If `escape_class` escapes `ending_delimiter` anyway, you may leave
+`quoted_ending_delimiter` equal to `None`.
+
+>>> gq = GenericQuote()
+>>> gq.quote('"', 'a\nb')
+'"a\\nb"'
+
+The `unescape` method returns a tuple (start_quote, end_position, unquoted_string).
+>>> gq.unquote('"a\\nb"')
+('"', 6, 'a\nb')
+
+Unmatched delimiters raise errors.
+>>> gq.unquote('"abc')
+Traceback (most recent call last):
+(...)
+generic_escape.NoEndingQuoteError
+
+A less boring example:
+>>> class LessBoringEscape(GenericEscape):
+...   escaped = {"&":"&amp;", "<":"&lt;", ">":"&gt;"}
+>>> gq.quoting_delimiters = {"<":(">",None)}
+>>> gq.escape_class = LessBoringEscape
+>>> gq.update()
+>>> gq.quote("<", "a>b")
+'<a&gt;b>'
+>>> gq.unquote("<x&amp;>")
+('<', 8, 'x&')
+"""
+    
+    escape_class = GenericEscape
+    quoting_delimiters = {"'":("'",r"\'"),
+                          '"':('"',r"\"")}
+    
+    def __init__(self, *args, **kwargs):
+        self.update()
+        super().__init__(*args, **kwargs)
+    
+    def update(self):
+        qds = self.quoting_delimiters
+        escape_class = self.escape_class
+        es = self._escaper_dict = {}
+        ue_re = self._unquote_ending_re = {}
+        for startq,(endq,endq_escaped) in qds.items():
+            e = es[startq] = escape_class()
+            e.escaped = e.escaped.copy()
+            if endq_escaped is not None:
+                e.escaped[endq] = endq_escaped
+            e.update()
+            ue_re[startq] = re.compile(re.escape(endq))
+        self._unquote_re = re.compile(
+            re_one_of(qds.keys()), re.DOTALL)
+        
+    def quote(self, start_quote, string):
+        return ''.join((start_quote,
+                        self._escaper_dict[start_quote].escape(string),
+                        self.quoting_delimiters[start_quote][0]))
+    
+    def unquote(self, string, *, start_position=0):
+        """returns (start_quote, end_position, unquoted_string)"""
+        m = self._unquote_re.match(string, start_position)
+        if not m:
+            raise NoStartingQuoteError
+        startq = m.group()
+        i, r = self._escaper_dict[startq].unescape(string, start_position=m.end())
+        m = self._unquote_ending_re[startq].match(string, i)
+        if not m:
+            raise NoEndingQuoteError
+        return (startq, m.end(), r)
 

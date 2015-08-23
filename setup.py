@@ -1,6 +1,6 @@
 from setuptools import setup
 pkg = "generic_escape"
-ver = '1.0.0'
+ver = '1.1.0'
 setup(name             = pkg,
       version          = ver,
       description      = "A simple library for escaping and unescaping strings",

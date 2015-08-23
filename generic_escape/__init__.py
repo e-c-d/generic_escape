@@ -29,6 +29,16 @@ Note that unescaping stops when an unescaped sequence is encountered, UNLESS it
 is in `unescape_whitelist`.
 >>> ge.unescape("ab\\nxy\nc")
 (6, 'ab\nxy')
+
+The `unescape_split` method can be used as a generalized str.split.
+>>> ge.escaped[" " ] = r"\s"
+>>> ge.escaped["\t"] = r"\t"
+>>> ge.update()
+>>> import re
+>>> ge.unescape_split("a b c", " ")
+(5, ['a', 'b', 'c'])
+>>> ge.unescape_split("a\sb   c\t\t d", re.compile("[ \t]+"))[1]
+['a b', 'c', 'd']
 """
     escaped = {"\\": r"\\",
                "\'": r"\'",
@@ -78,6 +88,26 @@ is in `unescape_whitelist`.
                 break
         
         return (i, ''.join(r))
+    
+    def unescape_split(self, string, delimiter, *, start_position=0, maxsplit=None):
+        """`delimiter` must be string or regex
+returns (end_position, list_of_strings)"""
+        if isinstance(delimiter, str):
+            delimiter = re.compile(re.escape(delimiter))
+        result = []
+        splitcount = 0
+        i = start_position
+        while True:
+            i, field = self.unescape(string, start_position=i)
+            result.append(field)
+            if maxsplit is not None and splitcount >= maxsplit:
+                break
+            m = delimiter.match(string, i)
+            if not m:
+                break
+            i = m.end()
+            splitcount += 1
+        return (i, result)
     
     def escape(self, string):
         """returns escaped string"""
